@@ -4,21 +4,22 @@ import requests
 import asyncio
 import threading
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from aiogram.filters import CommandStart
 from flask import Flask, render_template_string
 from dotenv import load_dotenv
 
-# 📦 Загружаем переменные из .env
+# 📦 Загружаем переменные окружения
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_MODEL = os.getenv("HF_MODEL")
 
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 app = Flask(__name__)
 
-# 🧠 Обращение к Hugging Face AI
+# 🧠 Функция общения с Hugging Face
 def generate_ai_reply(message: str) -> str:
     try:
         url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
@@ -32,8 +33,6 @@ def generate_ai_reply(message: str) -> str:
             return "⚠️ Произошла ошибка на сервере ИИ. Попробуй позже."
 
         data = response.json()
-
-        # Иногда HuggingFace возвращает список с generated_text
         if isinstance(data, list) and len(data) and "generated_text" in data[0]:
             return data[0]["generated_text"].strip()
         elif isinstance(data, dict) and "generated_text" in data:
@@ -44,21 +43,25 @@ def generate_ai_reply(message: str) -> str:
         print("Ошибка:", e)
         return "⚠️ Ошибка при обращении к ИИ."
 
-# 📩 Обработка сообщений от пользователя
-@dp.message_handler()
-async def handle_message(msg: types.Message):
-    user_text = msg.text.strip()
-    if not user_text:
-        return
+# 📩 Ответ на /start
+@dp.message(CommandStart())
+async def start_handler(msg: types.Message):
+    await msg.answer(
+        "Привет! 👋 Я Qoldaushy Bot.\n"
+        "Я здесь, чтобы тебя выслушать и поддержать. Просто напиши, что тебя тревожит 💬"
+    )
 
+# 📩 Ответ на все остальные сообщения
+@dp.message()
+async def message_handler(msg: types.Message):
+    user_text = msg.text.strip()
     await msg.answer("🧠 Думаю над ответом...")
 
     prompt = (
         f"Пользователь написал: {user_text}\n"
-        f"Ты — доброжелательный и понимающий психолог. "
-        f"Общайся как настоящий человек, не говори, что ты искусственный интеллект. "
-        f"Дай совет, поддержи, помоги разобраться в чувствах. "
-        f"Пиши на русском или казахском языке, в зависимости от того, на каком языке пользователь написал."
+        f"Ты — доброжелательный, внимательный психолог. "
+        f"Отвечай естественно, как человек. Не говори, что ты ИИ. "
+        f"Пиши на русском или казахском языке, в зависимости от языка пользователя."
     )
 
     reply = generate_ai_reply(prompt)
@@ -127,7 +130,7 @@ def index():
     """
     return render_template_string(html)
 
-# 🚀 Запуск Flask и Telegram бота
+# 🚀 Запуск бота и сайта
 async def run_bot():
     print("🤖 Qoldaushy Bot запущен!")
     await dp.start_polling(bot)
@@ -135,6 +138,6 @@ async def run_bot():
 def start_flask():
     app.run(host='0.0.0.0', port=10000)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     threading.Thread(target=start_flask).start()
     asyncio.run(run_bot())
