@@ -1,67 +1,79 @@
 import os
 import asyncio
 import threading
-from flask import Flask, render_template
+import requests
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart
-import aiohttp
+from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 
-# Загружаем токены
+# Загрузка токенов из .env или окружения
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
 
-# Flask (веб)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 app = Flask(__name__)
 
+# --- Функция общения с ИИ ---
+def ask_ai(message: str) -> str:
+    url = "https://api-inference.huggingface.co/models/meta-llama/Llama-3-8B-Instruct"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    prompt = f"""Ты — доброжелательный школьный психолог.
+Ты общаешься на русском и казахском языке с подростком, который переживает трудности.
+Отвечай естественно, по-человечески, не упоминай, что ты ИИ.
+
+Сообщение ученика: {message}
+
+Ответ:"""
+    try:
+        r = requests.post(url, headers=headers, json={"inputs": prompt}, timeout=60)
+        data = r.json()
+        if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
+            text = data[0]["generated_text"]
+        elif "generated_text" in data:
+            text = data["generated_text"]
+        else:
+            return "Извини, не расслышал. Расскажи немного подробнее?"
+        return text.split("Ответ:")[-1].strip()
+    except Exception:
+        return "Произошла ошибка при обращении к модели. Попробуй ещё раз позже."
+
+# --- Telegram бот ---
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    await message.answer(
+        "Сәлем! Я Qoldaushy Bot 💬\n\n"
+        "Я здесь, чтобы тебя выслушать. Расскажи, что тебя тревожит — "
+        "и я постараюсь помочь советом."
+    )
+
+@dp.message_handler()
+async def reply_user(message: types.Message):
+    await message.answer("Дай мне секунду, я подумаю...")
+    answer = ask_ai(message.text)
+    await message.answer(answer)
+
+# --- Flask сайт ---
 @app.route("/")
-def index():
+def home():
     return render_template("index.html")
 
-# Telegram-бот
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
+    user_msg = data.get("message", "")
+    if not user_msg.strip():
+        return jsonify({"reply": "Пожалуйста, напиши что-нибудь 🙃"})
+    reply = ask_ai(user_msg)
+    return jsonify({"reply": reply})
 
-async def get_ai_reply(user_message: str, lang="ru"):
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    prompt = f"Ты школьный психолог. Ответь {('на казахском' if lang=='kk' else 'на русском')} языком:\n\n{user_message}"
-    data = {"inputs": prompt, "parameters": {"max_new_tokens": 150}}
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f"https://api-inference.huggingface.co/models/{HF_MODEL}",
-                                headers=headers, json=data) as resp:
-            try:
-                result = await resp.json()
-                if isinstance(result, list) and "generated_text" in result[0]:
-                    return result[0]["generated_text"]
-                else:
-                    return "Извини, не понял тебя. Попробуй ещё раз ❤️"
-            except:
-                return "Ошибка при обращении к ИИ 😔"
-
-@dp.message(CommandStart())
-async def start_cmd(msg: types.Message):
-    await msg.answer("Сәлем! / Привет! Мен Qoldaushy Bot 🤖\n\n"
-                     "Расскажи, что тебя тревожит — я постараюсь помочь ❤️")
-
-@dp.message()
-async def message_handler(msg: types.Message):
-    lang = "kk" if any(ch in msg.text for ch in "әғқңөұүіһ") else "ru"
-    reply = await get_ai_reply(msg.text, lang)
-    await msg.answer(reply)
-
+# --- Асинхронный запуск Telegram-бота ---
 async def run_bot():
-    print("🤖 Бот запущен!")
+    print("🤖 Telegram-бот запущен!")
     await dp.start_polling(bot, skip_updates=True, handle_signals=False)
 
-def run_flask():
-    app.run(host="0.0.0.0", port=10000)
-
+# --- Главный запуск ---
 if __name__ == "__main__":
-    threading.Thread(target=lambda: asyncio.run(run_bot())).start()
-    run_flask()
+    threading.Thread(target=lambda: asyncio.run(run_bot()), daemon=True).start()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
