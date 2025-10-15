@@ -57,7 +57,7 @@ async def message_handler(msg: types.Message):
 
 async def run_bot():
     print("🤖 Бот запущен!")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True, handle_signals=False)
 
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
